@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14171c">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Augment Copilot</title>
+<style>
+/* Drive-mode first: giant glanceable states, one-tap flows, half-duplex voice. */
+:root{
+  --bg:#f5f6f8; --fg:#1b1f26; --muted:#5b6472; --card:#ffffff; --line:#d9dde4;
+  --accent:#b85c00; --good:#1a7f37; --bad:#b42318; --chip:#eceff3;
+}
+@media (prefers-color-scheme: dark){ :root{
+  --bg:#14171c; --fg:#e8eaee; --muted:#9aa3b0; --card:#1d2129; --line:#323845;
+  --accent:#ffb45c; --good:#4ac26b; --bad:#ff7a6e; --chip:#262b35; color-scheme:dark;
+}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.5 system-ui,Segoe UI,sans-serif;
+  padding:calc(14px + env(safe-area-inset-top,0px)) 16px calc(14px + env(safe-area-inset-bottom,0px));
+  max-width:560px;margin-inline:auto}
+h1{font-size:20px;margin:0 0 2px}
+.sub{color:var(--muted);font-size:13px;margin:0 0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+input{width:100%;font:15px system-ui;padding:11px;border:1px solid var(--line);
+  border-radius:8px;background:var(--bg);color:var(--fg)}
+button{font:600 16px system-ui;background:var(--accent);color:#fff;border:0;border-radius:10px;
+  padding:14px 18px;margin-top:12px;cursor:pointer;min-height:50px;width:100%}
+button.quiet{background:var(--chip);color:var(--fg)}
+button.stop{background:var(--bad)}
+button:disabled{opacity:.45}
+.row{display:flex;gap:10px}.row>button{flex:1}
+.status{font-size:13px;color:var(--muted);margin-top:10px;white-space:pre-wrap;word-break:break-word}
+.ok{color:var(--good)}.err{color:var(--bad)}
+#driveState{font-size:30px;font-weight:700;line-height:1.25;margin:18px 0;min-height:120px}
+#driveDetail{font-size:17px;color:var(--muted);white-space:pre-wrap;word-break:break-word}
+.note{font-size:12.5px;color:var(--muted);margin-top:10px}
+</style>
+</head>
+<body>
+<h1>Augment Copilot</h1>
+<p class="sub">morning brief &amp; evening debrief, hands-free</p>
+
+<section id="setup" class="card">
+  <strong>One-time setup</strong>
+  <label>Fine-grained GitHub token (Contents RW on the transport repo only)</label>
+  <input id="tok" type="password" autocomplete="off" placeholder="github_pat_…">
+  <label>Transport repo</label>
+  <input id="repo" value="pcetner/augment-transport">
+  <div class="row">
+    <button id="bTest" class="quiet">Test connection</button>
+    <button id="bMic" class="quiet">Enable mic</button>
+  </div>
+  <button id="bSave">Save &amp; continue</button>
+  <div class="status" id="setupStatus"></div>
+  <p class="note">The token lives only in this browser (localStorage), scoped to the one
+  private repo that carries briefs and journal entries. Speech-to-text uses Chrome's
+  Web Speech service (audio transits Google). Local-only transcription is the
+  fallback plan if that ever bothers you.</p>
+</section>
+
+<section id="home" hidden>
+  <div class="card">
+    <button id="bMorning">🌅 Morning drive</button>
+    <button id="bEvening">🌇 Evening debrief</button>
+    <div class="status" id="homeStatus"></div>
+  </div>
+  <div class="card">
+    <div class="row">
+      <button id="bFlush" class="quiet">Sync queued (<span id="qn">0</span>)</button>
+      <button id="bSetup" class="quiet">Settings</button>
+    </div>
+  </div>
+  <p class="note">Tap once before you pull out. Everything after is voice. Screen stays
+  awake; keep the phone mounted and charging.</p>
+</section>
+
+<section id="drive" hidden>
+  <div id="driveState">…</div>
+  <div id="driveDetail"></div>
+  <button id="bStop" class="stop">End session</button>
+</section>
+
+<script>
+(function(){
+"use strict";
+var $=function(id){return document.getElementById(id)};
+var LS={get:function(k,d){try{var v=localStorage.getItem(k);return v===null?d:JSON.parse(v)}catch(_){return d}},
+        set:function(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(_){}}};
+var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+var wakeLock=null, stopFlag=false, audioCtx=null;
+
+/* ---------- transport (GitHub contents API) ---------- */
+function cfg(){return {tok:LS.get("aug_tok",""), repo:LS.get("aug_repo","pcetner/augment-transport")}}
+function gh(path,opts){
+  var c=cfg(); opts=opts||{};
+  return fetch("https://api.github.com/repos/"+c.repo+"/contents/"+path,{
+    method:opts.method||"GET",
+    headers:{Authorization:"Bearer "+c.tok,Accept:"application/vnd.github+json",
+             "X-GitHub-Api-Version":"2022-11-28"},
+    body:opts.body?JSON.stringify(opts.body):undefined});
+}
+function b64enc(s){var b=new TextEncoder().encode(s),r="";for(var i=0;i<b.length;i++)r+=String.fromCharCode(b[i]);return btoa(r)}
+function b64dec(s){var bin=atob(s.replace(/\s/g,"")),u=new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return new TextDecoder().decode(u)}
+
+function fetchBrief(){
+  return gh("briefs/current.json").then(function(r){
+    if(r.status===404)throw{soft:true,msg:"no brief in the repo yet"};
+    if(!r.ok)throw{msg:"brief fetch HTTP "+r.status};
+    return r.json()}).then(function(j){return JSON.parse(b64dec(j.content))});
+}
+function putJournal(entry){
+  var path="journal/incoming/"+entry.ts.replace(/[:.]/g,"-")+".json";
+  return gh(path,{method:"PUT",body:{message:"journal "+entry.ts,content:b64enc(JSON.stringify(entry,null,1))}})
+    .then(function(r){if(!r.ok)throw{msg:"PUT HTTP "+r.status};return true});
+}
+function queue(entry){var q=LS.get("aug_queue",[]);q.push(entry);LS.set("aug_queue",q);updateQn()}
+function flush(){
+  var q=LS.get("aug_queue",[]);if(!q.length)return Promise.resolve(0);
+  var rest=[];
+  return q.reduce(function(p,e){return p.then(function(){return putJournal(e).catch(function(){rest.push(e)})})},Promise.resolve())
+    .then(function(){LS.set("aug_queue",rest);updateQn();return q.length-rest.length});
+}
+function updateQn(){$("qn").textContent=String(LS.get("aug_queue",[]).length)}
+
+/* ---------- audio: earcon + TTS + STT, strictly half-duplex ---------- */
+function earcon(){try{
+  audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+  if(audioCtx.state==="suspended")audioCtx.resume();
+  var o=audioCtx.createOscillator(),g=audioCtx.createGain();
+  o.frequency.value=880;g.gain.value=0.05;o.connect(g);g.connect(audioCtx.destination);
+  o.start();o.stop(audioCtx.currentTime+0.15);
+}catch(_){}}
+var voices=[];function loadVoices(){voices=speechSynthesis.getVoices()}
+loadVoices();if(window.speechSynthesis)speechSynthesis.onvoiceschanged=loadVoices;
+function pickVoice(){
+  var en=voices.filter(function(v){return /^en(-|_)US/i.test(v.lang)});
+  return en.filter(function(v){return /english/i.test(v.name)})[0]||en[0]||null; // null = system default
+}
+function speak(text){
+  return new Promise(function(res){
+    if(!window.speechSynthesis)return res(false);
+    speechSynthesis.cancel();earcon();
+    var parts=String(text).match(/[^.!?\n]+[.!?]*\s*/g)||[String(text)];
+    var i=0;
+    setTimeout(function next(){
+      if(stopFlag||i>=parts.length)return res(true);
+      var u=new SpeechSynthesisUtterance(parts[i++].trim());
+      var v=pickVoice();if(v)u.voice=v;u.rate=1.02;
+      u.onend=function(){next()};u.onerror=function(){res(false)};
+      speechSynthesis.speak(u);
+    },250);
+  });
+}
+function listen(ms){
+  return new Promise(function(res,rej){
+    if(!SR)return rej("no-stt");
+    var r=new SR();r.lang="en-US";r.interimResults=true;r.continuous=false;
+    var finalTxt="",timer=setTimeout(function(){try{r.stop()}catch(_){}},ms||20000);
+    r.onresult=function(ev){var t="";for(var i=0;i<ev.results.length;i++)t+=ev.results[i][0].transcript;
+      finalTxt=t;driveDetail("“"+t+"”")};
+    r.onerror=function(ev){clearTimeout(timer);rej(ev.error)};
+    r.onend=function(){clearTimeout(timer);finalTxt?res(finalTxt.trim()):rej("no-speech")};
+    setTimeout(function(){if(!stopFlag)try{r.start()}catch(e){rej("start-failed")}},400); // gap after TTS
+  });
+}
+
+/* ---------- wake lock ---------- */
+function grabLock(){if(!("wakeLock" in navigator))return;
+  navigator.wakeLock.request("screen").then(function(l){wakeLock=l}).catch(function(){})}
+document.addEventListener("visibilitychange",function(){
+  if(document.visibilityState==="visible"&&!$("drive").hidden)grabLock()});
+
+/* ---------- drive flow ---------- */
+function show(id){["setup","home","drive"].forEach(function(s){$(s).hidden=(s!==id)})}
+function driveState(s){$("driveState").textContent=s}
+function driveDetail(s){$("driveDetail").textContent=s}
+
+function ask(q,answers,attempt){
+  if(stopFlag)return Promise.resolve();
+  driveState(q);driveDetail("");
+  return speak(q).then(function(){if(stopFlag)return;
+    driveState("Listening…");
+    return listen(20000).then(function(a){answers.push({q:q,a:a})},
+      function(err){
+        if(stopFlag)return;
+        if(err==="no-speech"&&!attempt)return ask(q,answers,1);
+        answers.push({q:q,a:"(no answer: "+err+")"});
+      });
+  });
+}
+
+function drive(mode){
+  stopFlag=false;show("drive");grabLock();
+  driveState(mode==="morning"?"Fetching your brief…":"Starting debrief…");
+  var answers=[],briefMeta=null;
+  var t0=Date.now();
+  fetchBrief().catch(function(e){return {text:mode==="morning"
+      ?"Good morning. No brief in the repo yet, so this is the built-in default. "+(e.msg||"")
+      :null,questions:null,fallback:true}})
+  .then(function(brief){
+    briefMeta=brief&&brief.date?brief.date:"fallback";
+    var qs;
+    if(mode==="morning"){
+      qs=(brief&&brief.questions&&brief.questions.length?brief.questions:["What's the plan for today?"]).slice(0,2);
+      driveState("Your brief");driveDetail("");
+      return speak(brief.text||"Good morning.").then(function(){
+        return qs.reduce(function(p,q){return p.then(function(){return ask(q,answers)})},Promise.resolve());
+      });
+    }
+    qs=(brief&&brief.evening_questions&&brief.evening_questions.length?brief.evening_questions
+        :["Walk me through your day — what actually happened since this morning?",
+          "What annoyed you or wasted your time today?",
+          "What's the one thing for tomorrow?"]).slice(0,3);
+    return qs.reduce(function(p,q){return p.then(function(){return ask(q,answers)})},Promise.resolve());
+  })
+  .then(function(){
+    if(stopFlag&&!answers.length){driveState("Ended.");return}
+    driveState("Saving…");
+    var entry={ts:new Date().toISOString(),source:"pwa",mode:mode,brief:briefMeta,
+      duration_s:Math.round((Date.now()-t0)/1000),turns:answers,
+      ua:navigator.userAgent.slice(0,80)};
+    return putJournal(entry).then(function(){return flush()}).then(function(){
+      driveState("Logged. Drive safe.");speak(mode==="morning"?"Logged. Drive safe.":"All logged. Good night.");
+    }).catch(function(e){queue(entry);
+      driveState("Saved offline — will sync later.");speak("Saved offline. It will sync later.");
+    });
+  })
+  .catch(function(e){driveState("Error");driveDetail(String(e&&e.msg||e))});
+}
+
+/* ---------- wiring ---------- */
+$("bTest").onclick=function(){
+  var s=$("setupStatus");s.textContent="testing…";s.className="status";
+  LS.set("aug_tok",$("tok").value.trim());LS.set("aug_repo",$("repo").value.trim());
+  gh("").then(function(r){
+    if(r.status===404){s.textContent="repo reachable, empty (fine — briefs land tonight)";s.className="status ok"}
+    else if(r.ok){s.textContent="connection OK";s.className="status ok"}
+    else{s.textContent="HTTP "+r.status+(r.status===401?" — bad token":r.status===404?"":" ");s.className="status err"}
+  }).catch(function(){s.textContent="network error";s.className="status err"});
+};
+$("bMic").onclick=function(){
+  var s=$("setupStatus");
+  if(!SR){s.textContent="no SpeechRecognition in this browser";s.className="status err";return}
+  s.textContent="say something…";s.className="status";stopFlag=false;
+  listen(8000).then(function(t){s.textContent="mic OK — heard: "+t;s.className="status ok";LS.set("aug_micok",true)},
+    function(e){s.textContent="mic error: "+e+(e==="not-allowed"?" — check the padlock icon → Permissions → Microphone":"");s.className="status err"});
+};
+$("bSave").onclick=function(){
+  LS.set("aug_tok",$("tok").value.trim());LS.set("aug_repo",$("repo").value.trim());
+  show("home");updateQn();
+};
+$("bSetup").onclick=function(){ $("tok").value=LS.get("aug_tok","");$("repo").value=LS.get("aug_repo","pcetner/augment-transport");show("setup") };
+$("bMorning").onclick=function(){drive("morning")};
+$("bEvening").onclick=function(){drive("evening")};
+$("bStop").onclick=function(){stopFlag=true;try{speechSynthesis.cancel()}catch(_){}
+  if(wakeLock){try{wakeLock.release()}catch(_){}} show("home");flush()};
+$("bFlush").onclick=function(){var h=$("homeStatus");h.textContent="syncing…";
+  flush().then(function(n){h.textContent="synced "+n+" queued entr"+(n===1?"y":"ies");updateQn()})};
+
+if(LS.get("aug_tok","")){show("home");updateQn()}else{show("setup")}
+window.addEventListener("online",flush);
+})();
+</script>
+</body>
+</html>
