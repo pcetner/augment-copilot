@@ -1,0 +1,9 @@
+{
+  "name": "Augment Copilot",
+  "short_name": "Augment",
+  "description": "Morning brief and evening debrief, hands-free in the car.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#14171c",
+  "theme_color": "#14171c"
+}
