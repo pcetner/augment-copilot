@@ -3,268 +3,763 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#14171c">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e0f11" media="(prefers-color-scheme: dark)">
 <link rel="manifest" href="manifest.webmanifest">
 <title>Augment Copilot</title>
 <style>
-/* Drive-mode first: giant glanceable states, one-tap flows, half-duplex voice. */
+/* Drive mode first: glanceable state, one tap to start, half-duplex voice.
+   Colour is state (status_tracker rule): green = mic live, blue = speaking,
+   grey = working, amber = saved offline / degraded. Nothing else is coloured. */
 :root{
-  --bg:#f5f6f8; --fg:#1b1f26; --muted:#5b6472; --card:#ffffff; --line:#d9dde4;
-  --accent:#b85c00; --good:#1a7f37; --bad:#b42318; --chip:#eceff3;
+  color-scheme:light;
+  --bg:#f4f5f7;--surface:#fff;--field:#fff;
+  --fg:#15171b;--fg2:#4b515b;--fg3:#6c727c;
+  --line:rgb(0 0 0 / .09);--line2:rgb(0 0 0 / .15);
+  --primary:#15171b;--on-primary:#fff;
+  --ok:#13874d;--warn:#a76400;--info:#1f66d1;--muted:#a1a7b0;
+  --ok-t:#0b6a3a;--warn-t:#7d4a00;--bad-t:#a91f1f;
+  --bad-soft:rgb(207 45 45 / .1);--bad-press:rgb(207 45 45 / .18);
+  --focus:#1f66d1;--ring:rgb(31 102 209 / .22);
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
 }
-@media (prefers-color-scheme: dark){ :root{
-  --bg:#14171c; --fg:#e8eaee; --muted:#9aa3b0; --card:#1d2129; --line:#323845;
-  --accent:#ffb45c; --good:#4ac26b; --bad:#ff7a6e; --chip:#262b35; color-scheme:dark;
+@media (prefers-color-scheme:dark){:root{
+  color-scheme:dark;
+  --bg:#0e0f11;--surface:#18191d;--field:#131417;
+  --fg:#f1f2f4;--fg2:#b3b8c1;--fg3:#868c96;
+  --line:rgb(255 255 255 / .08);--line2:rgb(255 255 255 / .15);
+  --primary:#e9ebee;--on-primary:#0e0f11;
+  --ok:#34c77b;--warn:#f2b233;--info:#5aa7ff;--muted:#5d636c;
+  --ok-t:#5fe09c;--warn-t:#ffc95c;--bad-t:#ff8f8f;
+  --bad-soft:rgb(255 92 92 / .13);--bad-press:rgb(255 92 92 / .22);
+  --focus:#7cb6ff;--ring:rgb(124 182 255 / .25);
 }}
-*{box-sizing:border-box}
-html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--fg);
-  font:16px/1.5 system-ui,Segoe UI,sans-serif;
-  padding:calc(14px + env(safe-area-inset-top,0px)) 16px calc(14px + env(safe-area-inset-bottom,0px));
-  max-width:560px;margin-inline:auto}
-h1{font-size:20px;margin:0 0 2px}
-.sub{color:var(--muted);font-size:13px;margin:0 0 16px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
-label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
-input{width:100%;font:15px system-ui;padding:11px;border:1px solid var(--line);
-  border-radius:8px;background:var(--bg);color:var(--fg)}
-button{font:600 16px system-ui;background:var(--accent);color:#fff;border:0;border-radius:10px;
-  padding:14px 18px;margin-top:12px;cursor:pointer;min-height:50px;width:100%}
-button.quiet{background:var(--chip);color:var(--fg)}
-button.stop{background:var(--bad)}
-button:disabled{opacity:.45}
-.row{display:flex;gap:10px}.row>button{flex:1}
-.status{font-size:13px;color:var(--muted);margin-top:10px;white-space:pre-wrap;word-break:break-word}
-.ok{color:var(--good)}.err{color:var(--bad)}
-#driveState{font-size:30px;font-weight:700;line-height:1.25;margin:18px 0;min-height:120px}
-#driveDetail{font-size:17px;color:var(--muted);white-space:pre-wrap;word-break:break-word}
-.note{font-size:12.5px;color:var(--muted);margin-top:10px}
+*{box-sizing:border-box;margin:0;padding:0}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{background:var(--bg);color:var(--fg);font:16px/1.5 var(--sans);
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;cursor:pointer;touch-action:manipulation}
+button:focus-visible,input:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+
+/* ---------- home + settings ---------- */
+.page{max-width:560px;min-height:100vh;min-height:100dvh;margin:0 auto;display:flex;flex-direction:column;
+  padding:calc(8px + env(safe-area-inset-top,0px)) 20px calc(24px + env(safe-area-inset-bottom,0px))}
+.top{display:flex;align-items:center;justify-content:space-between;min-height:56px;margin-bottom:16px}
+.brand{font-size:17px;font-weight:600;letter-spacing:-.01em}
+h1{font-size:28px;font-weight:600;letter-spacing:-.02em;line-height:1.2}
+.link{background:none;border:0;color:var(--fg2);font-size:15px;font-weight:500;min-height:48px;padding:0 4px 0 16px}
+.go{display:block;width:100%;min-height:96px;padding:20px 22px;text-align:left;background:var(--surface);
+  border:1px solid var(--line);border-radius:18px;transition:transform .08s}
+.go+.go{margin-top:12px}
+.go b{display:block;font-size:22px;font-weight:600;letter-spacing:-.015em;line-height:1.25}
+.go span{display:block;margin-top:4px;font-size:15px;color:var(--fg2)}
+.go.primary{background:var(--primary);color:var(--on-primary);border-color:transparent}
+.go.primary span{color:inherit;opacity:.68}
+.go:active,.btn:active{transform:scale(.985)}
+.stats{margin-top:28px}
+.stat{display:flex;align-items:center;gap:12px;min-height:44px;font-size:15px;color:var(--fg2)}
+.stat .link{margin-left:auto}
+.dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}
+.status{margin-top:12px;font-size:14.5px;line-height:1.5;color:var(--fg2);white-space:pre-wrap;overflow-wrap:anywhere}
+.status:empty{display:none}
+.ok-t{color:var(--ok-t)}.warn-t{color:var(--warn-t)}.err-t{color:var(--bad-t)}
+.note{margin-top:auto;padding-top:32px;font-size:13px;line-height:1.55;color:var(--fg3)}
+.field{margin-top:22px}
+label{display:block;margin-bottom:8px;font-size:14px;font-weight:600}
+label small{margin-left:6px;font-size:13px;font-weight:400;color:var(--fg3)}
+input{display:block;width:100%;height:52px;padding:0 14px;font:16px var(--sans);color:var(--fg);
+  background:var(--field);border:1px solid var(--line2);border-radius:12px;outline:0;
+  transition:border-color .15s,box-shadow .15s}
+input:focus{border-color:var(--focus);box-shadow:0 0 0 3px var(--ring)}
+.help{margin-top:8px;font-size:13.5px;line-height:1.5;color:var(--fg3)}
+.row{display:flex;gap:10px;margin-top:28px}
+.btn{flex:1;min-height:52px;padding:0 16px;font-size:16px;font-weight:600;background:var(--surface);
+  border:1px solid var(--line2);border-radius:12px;transition:transform .08s}
+.btn.primary{display:block;width:100%;margin-top:10px;background:var(--primary);color:var(--on-primary);border-color:transparent}
+
+/* ---------- drive: full screen, End session always visible ---------- */
+#drive{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg);
+  padding:env(safe-area-inset-top,0px) calc(20px + env(safe-area-inset-right,0px))
+    calc(16px + env(safe-area-inset-bottom,0px)) calc(20px + env(safe-area-inset-left,0px))}
+.sbar{flex:none;height:8px;background:var(--muted);transition:background-color .25s;
+  margin:0 calc(-20px - env(safe-area-inset-right,0px)) 0 calc(-20px - env(safe-area-inset-left,0px))}
+.dhead{flex:none;display:flex;justify-content:space-between;gap:12px;padding-top:16px;
+  font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--fg3)}
+.dmain{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;justify-content:center;padding:20px 0}
+#driveState{font-size:clamp(40px,12vw,60px);font-weight:600;line-height:1.08;letter-spacing:-.03em;
+  overflow-wrap:anywhere;transition:color .25s}
+#driveState.m{font-size:clamp(30px,9vw,44px);line-height:1.16;letter-spacing:-.02em}
+#driveState.l{font-size:clamp(22px,6.4vw,32px);line-height:1.3;letter-spacing:-.01em}
+#driveDetail{margin-top:18px;font-size:clamp(18px,5vw,22px);line-height:1.4;color:var(--fg2);overflow-wrap:anywhere}
+#driveDetail:empty{display:none}
+#bStop{flex:none;width:100%;height:96px;border:0;border-radius:20px;background:var(--bad-soft);
+  color:var(--bad-t);font-size:24px;font-weight:600;letter-spacing:-.01em}
+#bStop:active{background:var(--bad-press)}
+#bStop.done{background:var(--surface);color:var(--fg);border:1px solid var(--line2)}
+#drive[data-s=listening] .sbar,#drive[data-s=done] .sbar{background:var(--ok)}
+#drive[data-s=listening] #driveState{color:var(--ok-t)}
+#drive[data-s=speaking] .sbar{background:var(--info)}
+#drive[data-s=warn] .sbar{background:var(--warn)}
+@media (orientation:landscape) and (max-height:540px){
+  #drive{display:grid;grid-template-columns:minmax(0,1fr) 32%;grid-template-rows:auto auto minmax(0,1fr);column-gap:24px}
+  .sbar{grid-column:1/-1}
+  .dhead,.dmain{grid-column:1}
+  #bStop{grid-column:2;grid-row:2/4;height:auto;margin-top:16px}
+  #driveState{font-size:clamp(30px,11vh,52px)}
+  #driveState.m{font-size:clamp(22px,7.5vh,36px)}
+  #driveState.l{font-size:clamp(17px,5.6vh,26px)}
+  #driveDetail{margin-top:12px;font-size:clamp(15px,4.5vh,20px)}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
-<h1>Augment Copilot</h1>
-<p class="sub">morning brief &amp; evening debrief, hands-free</p>
 
-<section id="setup" class="card">
-  <strong>One-time setup</strong>
-  <label>Fine-grained GitHub token (Contents RW on the transport repo only)</label>
-  <input id="tok" type="password" autocomplete="off" placeholder="github_pat_…">
-  <label>Transport repo</label>
-  <input id="repo" value="pcetner/augment-transport">
+<section id="setup" class="page" hidden>
+  <header class="top">
+    <h1 id="setupTitle">Settings</h1>
+    <button id="bClose" class="link" hidden>Close</button>
+  </header>
+  <div class="field">
+    <label for="tok">GitHub token</label>
+    <input id="tok" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+    <p class="help">Fine-grained, with Contents read and write on the transport repo only.</p>
+  </div>
+  <div class="field">
+    <label for="repo">Transport repo</label>
+    <input id="repo" autocomplete="off" autocapitalize="off" spellcheck="false" value="pcetner/augment-transport">
+  </div>
+  <div class="field">
+    <label for="akey">Anthropic API key<small>optional</small></label>
+    <input id="akey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+    <p class="help">Turns on live spoken replies after the questions. Stored only on this device.
+    Unlike the GitHub token, which can only touch one private repo, this key can spend real API money,
+    so create a dedicated key with a low monthly limit at console.anthropic.com. Without a key, free talk
+    is still captured and journaled; replies arrive in tomorrow's brief instead.</p>
+  </div>
   <div class="row">
-    <button id="bTest" class="quiet">Test connection</button>
-    <button id="bMic" class="quiet">Enable mic</button>
+    <button id="bTest" class="btn">Test connection</button>
+    <button id="bMic" class="btn">Enable mic</button>
   </div>
-  <button id="bSave">Save &amp; continue</button>
-  <div class="status" id="setupStatus"></div>
-  <p class="note">The token lives only in this browser (localStorage), scoped to the one
-  private repo that carries briefs and journal entries. Speech-to-text uses Chrome's
-  Web Speech service (audio transits Google). Local-only transcription is the
-  fallback plan if that ever bothers you.</p>
+  <button id="bSave" class="btn primary">Save</button>
+  <div id="setupStatus" class="status" role="status"></div>
+  <p class="note">Keys stay in this browser's storage. Speech-to-text uses Chrome's Web Speech service,
+  so audio transits Google; local transcription is the fallback if that ever bothers you. With an
+  Anthropic key, today's brief, your answers and what you say in free talk go to Anthropic to write replies.</p>
 </section>
 
-<section id="home" hidden>
-  <div class="card">
-    <button id="bMorning">🌅 Morning drive</button>
-    <button id="bEvening">🌇 Evening debrief</button>
-    <div class="status" id="homeStatus"></div>
+<section id="home" class="page" hidden>
+  <header class="top">
+    <span class="brand">Augment Copilot</span>
+    <button id="bSetup" class="link">Settings</button>
+  </header>
+  <button id="bMorning" class="go"><b>Morning drive</b><span>Brief and check-in, then free talk</span></button>
+  <button id="bEvening" class="go"><b>Evening debrief</b><span>Check-in, then free talk</span></button>
+  <div class="stats">
+    <div class="stat"><span id="dotLive" class="dot" aria-hidden="true"></span><span id="liveTxt"></span></div>
+    <div class="stat"><span id="dotSync" class="dot" aria-hidden="true"></span><span id="syncTxt"></span><button id="bFlush" class="link" hidden>Sync now</button></div>
   </div>
-  <div class="card">
-    <div class="row">
-      <button id="bFlush" class="quiet">Sync queued (<span id="qn">0</span>)</button>
-      <button id="bSetup" class="quiet">Settings</button>
-    </div>
-  </div>
-  <p class="note">Tap once before you pull out. Everything after is voice. Screen stays
-  awake; keep the phone mounted and charging.</p>
+  <p id="homeStatus" class="status"></p>
+  <p class="note">Tap once before you pull out; everything after is voice. The screen stays awake during
+  a session, so keep the phone mounted and charging.</p>
 </section>
 
-<section id="drive" hidden>
-  <div id="driveState">…</div>
-  <div id="driveDetail"></div>
-  <button id="bStop" class="stop">End session</button>
+<section id="drive" data-s="busy" hidden>
+  <div class="sbar"></div>
+  <div class="dhead"><span id="dMode"></span><span id="dStep"></span></div>
+  <div class="dmain">
+    <div id="driveState"></div>
+    <div id="driveDetail"></div>
+  </div>
+  <button id="bStop">End session</button>
 </section>
 
 <script>
-(function(){
+(() => {
 "use strict";
-var $=function(id){return document.getElementById(id)};
-var LS={get:function(k,d){try{var v=localStorage.getItem(k);return v===null?d:JSON.parse(v)}catch(_){return d}},
-        set:function(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(_){}}};
-var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-var wakeLock=null, stopFlag=false, audioCtx=null;
+const $ = id => document.getElementById(id);
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (_) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (_) {} }
+};
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const synth = window.speechSynthesis || null;
+const REPO0 = "pcetner/augment-transport";
+const API = "https://api.anthropic.com/v1/messages";
+const MODEL = "claude-haiku-4-5-20251001";
+const HIST_MAX = 12;   // rolling free-talk history sent with each reply request, in messages
+const FATAL = /^(not-allowed|service-not-allowed|audio-capture|no-stt|language-not-supported)$/;
+const EVENING_QS = ["Walk me through your day — what actually happened since this morning?",
+  "What annoyed you or wasted your time today?",
+  "What's the one thing for tomorrow?"];
+const ACKS = ["Noted.", "Got it.", "Logged.", "Okay, noted."];
 
-/* ---------- transport (GitHub contents API) ---------- */
-function cfg(){return {tok:LS.get("aug_tok",""), repo:LS.get("aug_repo","pcetner/augment-transport")}}
-function gh(path,opts){
-  var c=cfg(); opts=opts||{};
-  return fetch("https://api.github.com/repos/"+c.repo+"/contents/"+path,{
-    method:opts.method||"GET",
-    headers:{Authorization:"Bearer "+c.tok,Accept:"application/vnd.github+json",
-             "X-GitHub-Api-Version":"2022-11-28"},
-    body:opts.body?JSON.stringify(opts.body):undefined});
+let cur = null;          // the session on screen; older sessions finish saving but never paint or speak
+let wakeLock = null, audioCtx = null, utt = null, flushing = null, flushAgain = false;
+const cancels = new Set();   // stop hooks for in-flight speech, listening and API calls
+function cancelAll() { Array.from(cancels).forEach(f => { try { f(); } catch (_) {} }); cancels.clear(); }
+function timed(ms) {
+  const c = new AbortController(), t = setTimeout(() => c.abort(), ms);
+  return { signal: c.signal, abort: () => c.abort(), done: () => clearTimeout(t) };
 }
-function b64enc(s){var b=new TextEncoder().encode(s),r="";for(var i=0;i<b.length;i++)r+=String.fromCharCode(b[i]);return btoa(r)}
-function b64dec(s){var bin=atob(s.replace(/\s/g,"")),u=new Uint8Array(bin.length);
-  for(var i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return new TextDecoder().decode(u)}
 
-function fetchBrief(){
-  return gh("briefs/current.json").then(function(r){
-    if(r.status===404)throw{soft:true,msg:"no brief in the repo yet"};
-    if(!r.ok)throw{msg:"brief fetch HTTP "+r.status};
-    return r.json()}).then(function(j){return JSON.parse(b64dec(j.content))});
+/* ---------- transport (GitHub contents API, private transport repo) ---------- */
+function cfg() { return { tok: LS.get("aug_tok", ""), repo: LS.get("aug_repo", REPO0) }; }
+function gh(path, opts) {
+  opts = opts || {};
+  const c = cfg(), tm = timed(opts.timeout || 20000);   // bounded, so a dead zone queues instead of hanging
+  return fetch("https://api.github.com/repos/" + c.repo + "/contents/" + path, {
+    method: opts.method || "GET",
+    headers: { Authorization: "Bearer " + c.tok, Accept: "application/vnd.github+json",
+               "X-GitHub-Api-Version": "2022-11-28" },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    signal: tm.signal
+  }).finally(tm.done);
 }
-function putJournal(entry){
-  var path="journal/incoming/"+entry.ts.replace(/[:.]/g,"-")+".json";
-  return gh(path,{method:"PUT",body:{message:"journal "+entry.ts,content:b64enc(JSON.stringify(entry,null,1))}})
-    .then(function(r){if(!r.ok)throw{msg:"PUT HTTP "+r.status};return true});
+function b64enc(s) { const b = new TextEncoder().encode(s); let r = ""; for (let i = 0; i < b.length; i++) r += String.fromCharCode(b[i]); return btoa(r); }
+function b64dec(s) { const bin = atob(s.replace(/\s/g, "")), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new TextDecoder().decode(u); }
+
+function fetchBrief() {
+  return gh("briefs/current.json", { timeout: 12000 }).then(r => {
+    if (r.status === 404) throw { soft: true, msg: "no brief in the repo yet" };
+    if (!r.ok) throw { status: r.status, msg: "brief fetch HTTP " + r.status };
+    return r.json();
+  }).then(j => JSON.parse(b64dec(j.content)));
 }
-function queue(entry){var q=LS.get("aug_queue",[]);q.push(entry);LS.set("aug_queue",q);updateQn()}
-function flush(){
-  var q=LS.get("aug_queue",[]);if(!q.length)return Promise.resolve(0);
-  var rest=[];
-  return q.reduce(function(p,e){return p.then(function(){return putJournal(e).catch(function(){rest.push(e)})})},Promise.resolve())
-    .then(function(){LS.set("aug_queue",rest);updateQn();return q.length-rest.length});
+function putJournal(entry) {
+  const path = "journal/incoming/" + entry.ts.replace(/[:.]/g, "-") + ".json";
+  return gh(path, { method: "PUT", body: { message: "journal " + entry.ts, content: b64enc(JSON.stringify(entry, null, 1)) } })
+    .then(r => { if (!r.ok) throw { msg: "PUT HTTP " + r.status }; return true; });
 }
-function updateQn(){$("qn").textContent=String(LS.get("aug_queue",[]).length)}
+function queue(entry) { const q = LS.get("aug_queue", []); q.push(entry); LS.set("aug_queue", q); updateQn(); }
+function flush() {
+  // One pass at a time (nothing is PUT twice); a trigger that arrives mid-pass gets one follow-up pass.
+  if (flushing) { flushAgain = true; return flushing; }
+  const q = LS.get("aug_queue", []);
+  if (!q.length) { updateQn(); return Promise.resolve(0); }
+  const sent = new Set();
+  flushing = q.reduce((p, e) => p.then(() => putJournal(e)).then(() => { sent.add(e.ts); }, () => {}), Promise.resolve())
+    .then(() => {   // re-read: entries queued while flushing must survive
+      LS.set("aug_queue", LS.get("aug_queue", []).filter(e => !sent.has(e.ts)));
+      updateQn(); return sent.size;
+    })
+    .finally(() => { flushing = null; })
+    .then(n => { if (!flushAgain) return n; flushAgain = false; return flush().then(m => n + m); });
+  return flushing;
+}
+
+/* In-progress session checkpoint (local only): a page kill mid-drive lands in the queue on next open. */
+function drafts() { const d = LS.get("aug_draft", {}); return d && typeof d === "object" && !Array.isArray(d) ? d : {}; }
+function saveDraft(s, e) { const d = drafts(); d[s.t0] = e; LS.set("aug_draft", d); }
+function clearDraft(s) { const d = drafts(); delete d[s.t0]; if (Object.keys(d).length) LS.set("aug_draft", d); else LS.del("aug_draft"); }
+function recoverDrafts() {
+  const d = drafts(), keys = Object.keys(d);
+  if (!keys.length) return 0;
+  const q = LS.get("aug_queue", []);
+  keys.forEach(k => { const e = d[k]; if (e && e.ts && !q.some(x => x.ts === e.ts)) { e.interrupted = true; q.push(e); } });
+  LS.set("aug_queue", q); LS.del("aug_draft");
+  return keys.length;
+}
 
 /* ---------- audio: earcon + TTS + STT, strictly half-duplex ---------- */
-function earcon(){try{
-  audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
-  if(audioCtx.state==="suspended")audioCtx.resume();
-  var o=audioCtx.createOscillator(),g=audioCtx.createGain();
-  o.frequency.value=880;g.gain.value=0.05;o.connect(g);g.connect(audioCtx.destination);
-  o.start();o.stop(audioCtx.currentTime+0.15);
-}catch(_){}}
-var voices=[];function loadVoices(){voices=speechSynthesis.getVoices()}
-loadVoices();if(window.speechSynthesis)speechSynthesis.onvoiceschanged=loadVoices;
-function pickVoice(){
-  var en=voices.filter(function(v){return /^en(-|_)US/i.test(v.lang)});
-  return en.filter(function(v){return /english/i.test(v.name)})[0]||en[0]||null; // null = system default
+function audio() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") Promise.resolve(audioCtx.resume()).catch(() => {});
+  } catch (_) {}
+  return audioCtx;
 }
-function speak(text){
-  return new Promise(function(res){
-    if(!window.speechSynthesis)return res(false);
-    speechSynthesis.cancel();earcon();
-    var parts=String(text).match(/[^.!?\n]+[.!?]*\s*/g)||[String(text)];
-    var i=0;
-    setTimeout(function next(){
-      if(stopFlag||i>=parts.length)return res(true);
-      var u=new SpeechSynthesisUtterance(parts[i++].trim());
-      var v=pickVoice();if(v)u.voice=v;u.rate=1.02;
-      u.onend=function(){next()};u.onerror=function(){res(false)};
-      speechSynthesis.speak(u);
-    },250);
+function earcon() {   // preroll tone: opens the Bluetooth A2DP route so speech is not clipped
+  try {
+    const ac = audio(), t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.05, t + 0.012);
+    g.gain.setValueAtTime(0.05, t + 0.135);
+    g.gain.linearRampToValueAtTime(0, t + 0.15);
+    o.connect(g); g.connect(ac.destination);
+    o.start(t); o.stop(t + 0.16);
+  } catch (_) {}
+}
+let voices = [];
+function loadVoices() { try { voices = synth ? synth.getVoices() : []; } catch (_) { voices = []; } }
+loadVoices();
+if (synth) synth.onvoiceschanged = loadVoices;
+function pickVoice() {
+  const en = voices.filter(v => /^en(-|_)US/i.test(v.lang));
+  return en.filter(v => /english/i.test(v.name))[0] || en[0] || null;   // null = system default
+}
+function chunks(text) {   // sentences, each under 200 chars (long ones split at a comma or space)
+  const out = [];
+  (String(text || "").match(/(?:[^.!?\n]|\.(?=\d))+[.!?]*\s*/g) || []).forEach(s => {
+    s = s.replace(/\s+/g, " ").trim();
+    while (s.length > 190) {
+      let cut = Math.max(s.lastIndexOf(", ", 180), s.lastIndexOf("; ", 180), s.lastIndexOf(": ", 180), s.lastIndexOf(" — ", 180));
+      if (cut < 60) cut = s.lastIndexOf(" ", 180);
+      if (cut < 1) cut = 180;
+      out.push(s.slice(0, cut + 1).trim());
+      s = s.slice(cut + 1).trim();
+    }
+    if (/[a-z0-9]/i.test(s)) out.push(s);
+  });
+  return out;
+}
+function speak(text, s) {
+  return new Promise(resolve => {
+    const parts = chunks(text);
+    if (!synth || !parts.length || (s && s.stopped)) return resolve(false);
+    let i = 0, done = false, wd = 0;
+    const end = ok => { if (done) return; done = true; clearTimeout(wd); cancels.delete(cancel); utt = null; resolve(ok); };
+    const cancel = () => { try { synth.cancel(); } catch (_) {} end(false); };
+    cancels.add(cancel);
+    try { synth.cancel(); } catch (_) {}
+    earcon();
+    const next = () => {
+      clearTimeout(wd);
+      if (done) return;
+      if (s && s.stopped) return cancel();
+      if (i >= parts.length) return end(true);
+      const u = utt = new SpeechSynthesisUtterance(parts[i++]);   // held globally: Chrome can GC it and drop onend
+      const v = pickVoice();
+      if (v) u.voice = v; else u.lang = "en-US";
+      u.rate = 1.02;
+      let moved = false;
+      const go = () => { if (!moved) { moved = true; next(); } };
+      u.onend = go;
+      u.onerror = () => { if (!moved) end(false); };
+      // Watchdog for a missing onend: advance only once the engine is idle, so we never listen over speech.
+      const hard = Date.now() + 20000 + u.text.length * 150;
+      const watch = () => {
+        if (done || moved) return;
+        if (Date.now() > hard) { moved = true; try { synth.cancel(); } catch (_) {} return next(); }
+        if (synth.speaking || synth.pending) wd = setTimeout(watch, 400); else go();
+      };
+      wd = setTimeout(watch, 2500 + u.text.length * 110);
+      synth.speak(u);
+    };
+    setTimeout(next, 250);   // let the earcon open the route first
   });
 }
-function listen(ms){
-  return new Promise(function(res,rej){
-    if(!SR)return rej("no-stt");
-    var r=new SR();r.lang="en-US";r.interimResults=true;r.continuous=false;
-    var finalTxt="",timer=setTimeout(function(){try{r.stop()}catch(_){}},ms||20000);
-    r.onresult=function(ev){var t="";for(var i=0;i<ev.results.length;i++)t+=ev.results[i][0].transcript;
-      finalTxt=t;driveDetail("“"+t+"”")};
-    r.onerror=function(ev){clearTimeout(timer);rej(ev.error)};
-    r.onend=function(){clearTimeout(timer);finalTxt?res(finalTxt.trim()):rej("no-speech")};
-    setTimeout(function(){if(!stopFlag)try{r.start()}catch(e){rej("start-failed")}},400); // gap after TTS
+function listen(ms, s, hooks) {   // one utterance; resolves the transcript, rejects with an error code
+  hooks = hooks || {};
+  return new Promise((resolve, reject) => {
+    if (!SR) return reject("no-stt");
+    if (s && s.stopped) return reject("stopped");
+    let r = null, done = false, txt = "", timer = 0, gap = 0;
+    const waitUntil = Date.now() + 4000;   // bounded, in case a device reports `speaking` stale
+    const end = (ok, v) => {
+      if (done) return; done = true;
+      clearTimeout(timer); clearTimeout(gap); cancels.delete(cancel);
+      if (ok) resolve(v); else reject(v);
+    };
+    const cancel = () => {   // settle first (keeping any partial words), then close the mic
+      const t = txt.trim(); if (t) end(true, t); else end(false, "stopped");
+      try { if (r) r.abort(); } catch (_) {}
+    };
+    cancels.add(cancel);
+    const begin = () => {
+      if (done) return;
+      if (s && s.stopped) return end(false, "stopped");
+      if (synth && (synth.speaking || synth.pending)) {   // never open the mic while speaking
+        if (Date.now() < waitUntil) { gap = setTimeout(begin, 200); return; }
+        try { synth.cancel(); } catch (_) {}
+      }
+      r = new SR(); r.lang = "en-US"; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
+      r.onstart = () => { if (!done && hooks.onStart) hooks.onStart(); };
+      r.onresult = ev => {
+        let t = ""; for (let i = 0; i < ev.results.length; i++) t += ev.results[i][0].transcript;
+        txt = t; if (!done && hooks.onText) hooks.onText(t);
+      };
+      r.onerror = ev => end(false, ev.error || "error");
+      r.onend = () => { const t = txt.trim(); if (t) end(true, t); else end(false, "no-speech"); };
+      try { r.start(); } catch (_) { return end(false, "start-failed"); }
+      timer = setTimeout(() => {
+        try { r.stop(); } catch (_) {}
+        timer = setTimeout(() => { try { r.abort(); } catch (_) {} const t = txt.trim(); if (t) end(true, t); else end(false, "no-speech"); }, 3000);
+      }, ms || 20000);
+    };
+    gap = setTimeout(begin, 400);   // gap after TTS
   });
 }
+
+/* ---------- live replies (optional Anthropic key) ---------- */
+function anthropic(body, key, ms) {
+  const tm = timed(ms), stop = () => tm.abort();
+  cancels.add(stop);
+  return fetch(API, {
+    method: "POST", signal: tm.signal,
+    headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01",
+               "anthropic-dangerous-direct-browser-access": "true" },
+    body: JSON.stringify(body)
+  }).then(r => r.json().catch(() => ({})).then(j => ({ r, j })))
+    .finally(() => { tm.done(); cancels.delete(stop); });
+}
+function speakable(t) {
+  return String(t || "").replace(/```[\s\S]*?```/g, " ").replace(/\p{Extended_Pictographic}/gu, "")
+    .replace(/^\s*(?:[-*•]|\d+[.)])\s+/gm, "").replace(/[*_`#>|~]+/g, "").replace(/\s+/g, " ").trim();
+}
+function reply(s) {
+  return anthropic({ model: MODEL, max_tokens: 250, system: s.sys, messages: s.history }, s.key, 15000).then(({ r, j }) => {
+    if (!r.ok) throw { msg: "HTTP " + r.status + (j.error && j.error.type ? " " + j.error.type : "") };
+    let t = speakable((j.content || []).filter(b => b.type === "text").map(b => b.text).join(" "));
+    if (j.stop_reason === "max_tokens") { const m = t.match(/^[\s\S]*[.!?]/); if (m) t = m[0]; }
+    if (!t) throw { msg: "empty reply" + (j.stop_reason ? " (" + j.stop_reason + ")" : "") };
+    return { text: t, usage: j.usage };
+  });
+}
+function cost(usage, inChars, outChars) {   // Haiku 4.5: $1/M in, $5/M out; chars/4 when usage is missing
+  const tin = usage && usage.input_tokens != null ? usage.input_tokens : Math.ceil(inChars / 4);
+  const tout = usage && usage.output_tokens != null ? usage.output_tokens : Math.ceil(outChars / 4);
+  return (tin + tout * 5) / 1e6;
+}
+function sysPrompt(s) {
+  const when = new Date().toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const qa = s.turns.filter(t => t.q).map(t => "Q: " + t.q + "\nA: " + t.a).join("\n\n");
+  return [
+    "You are Augment, Peter's commute copilot, riding along in his car. He is driving: he hears you through text-to-speech and you hear him through speech recognition, so expect transcription slips and read him charitably.",
+    "",
+    "How to reply:",
+    "- At most two short sentences, unless he asks for more.",
+    "- Pure speakable prose: no lists, no markdown, no emojis, no URLs, nothing that sounds odd read aloud.",
+    "- Let him lead. You may end with one sharp follow-up question when it truly helps, but never ask more than one question in a reply.",
+    "- Stay grounded in today's brief and his answers below. If you don't know something, say so; never invent deadlines, events or numbers.",
+    "- You can't take actions. If he asks for something to be done or remembered, say it's logged for the next brief.",
+    "- Never ask him to look at or touch the phone.",
+    "",
+    "Right now: " + (s.mode === "morning" ? "the morning drive" : "the evening drive home") + ", " + when + ". He has just answered the scripted check-in questions; this is open conversation.",
+    "",
+    "Today's brief" + (s.briefDate ? " (" + s.briefDate + ")" : "") + ":",
+    s.briefText || "(no brief available today)",
+    "",
+    "His check-in answers from a few minutes ago:",
+    qa || "(none)"
+  ].join("\n");
+}
+
+/* ---------- voice commands ---------- */
+function norm(t) { return String(t || "").toLowerCase().replace(/[‘’]/g, "'").replace(/[^a-z0-9' ]+/g, " ").replace(/\s+/g, " ").trim(); }
+const CLOSE_RE = new RegExp("^(?:(?:ok|okay|alright|all right|yeah|yep|yes|no|nope|um+|uh+|so|well|cool|great|perfect|thanks|thank you|and)\\s+)*" +
+  "(?:end (?:the )?session|stop (?:the )?session|that'?s all|that is all|that'?s it|that is it|that'?ll be all|good ?bye|bye(?: bye)?|" +
+  "i'?m done|i am done|we'?re done|we are done|all done|nothing else|stop|talk (?:to you )?later|see you(?: later)?)" +
+  "(?:\\s+(?:for now|for today|then|thanks|thank you|bye|goodbye|good bye))*$");
+const NEG_RE = /^(?:no|nope|nah|nothing|not really|not now|no thanks|no thank you|i'?m good|all good)(?: thanks| thank you)?$/;
+const END_RE = /^(?:(?:ok|okay|alright)\s+)?(?:end (?:the )?session|stop (?:the )?session|stop|good ?bye|bye)$/;
+function closing(t, first) { const n = norm(t); return CLOSE_RE.test(n) || (first && NEG_RE.test(n)); }
 
 /* ---------- wake lock ---------- */
-function grabLock(){if(!("wakeLock" in navigator))return;
-  navigator.wakeLock.request("screen").then(function(l){wakeLock=l}).catch(function(){})}
-document.addEventListener("visibilitychange",function(){
-  if(document.visibilityState==="visible"&&!$("drive").hidden)grabLock()});
+function grabLock() {
+  if (!("wakeLock" in navigator)) return;
+  navigator.wakeLock.request("screen").then(l => {
+    if (!cur || cur.done || cur.stopped) { l.release().catch(() => {}); return; }
+    wakeLock = l;
+  }).catch(() => {});
+}
+function dropLock() { const l = wakeLock; wakeLock = null; if (l) Promise.resolve().then(() => l.release()).catch(() => {}); }
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && cur && !cur.done && !cur.stopped) grabLock();
+});
 
-/* ---------- drive flow ---------- */
-function show(id){["setup","home","drive"].forEach(function(s){$(s).hidden=(s!==id)})}
-function driveState(s){$("driveState").textContent=s}
-function driveDetail(s){$("driveDetail").textContent=s}
-
-function ask(q,answers,attempt){
-  if(stopFlag)return Promise.resolve();
-  driveState(q);driveDetail("");
-  return speak(q).then(function(){if(stopFlag)return;
-    driveState("Listening…");
-    return listen(20000).then(function(a){answers.push({q:q,a:a})},
-      function(err){
-        if(stopFlag)return;
-        if(err==="no-speech"&&!attempt)return ask(q,answers,1);
-        answers.push({q:q,a:"(no answer: "+err+")"});
-      });
-  });
+/* ---------- screens ---------- */
+function show(id) {
+  ["setup", "home", "drive"].forEach(k => { $(k).hidden = k !== id; });
+  if (id === "home") renderHome();
+  if (id === "setup") fillSetup();
+}
+function ui(s, state, big, detail) {
+  if (s !== cur) return;
+  big = String(big || "");
+  $("drive").setAttribute("data-s", state);
+  const el = $("driveState");
+  el.textContent = big;
+  el.className = big.length > 90 ? "l" : big.length > 34 ? "m" : "";
+  if (detail !== undefined) $("driveDetail").textContent = detail;
+}
+function detail(s, t) { if (s === cur) $("driveDetail").textContent = t; }
+function step(s, t) { if (s === cur) $("dStep").textContent = t; }
+function quote(t) { t = String(t || "").trim(); return t ? "“" + (t.length > 180 ? "…" + t.slice(-180) : t) + "”" : ""; }
+function hear(s, context) { return { onStart: () => ui(s, "listening", "Listening", context || ""), onText: t => detail(s, quote(t)) }; }
+function today() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+function clock() { return new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+function homeNote(t, tone) { const h = $("homeStatus"); h.textContent = t || ""; h.className = "status" + (tone ? " " + tone + "-t" : ""); }
+function renderHome() {
+  const key = !!LS.get("aug_akey", ""), pm = new Date().getHours() >= 12;
+  $("dotLive").className = "dot" + (key ? " ok" : "");
+  $("liveTxt").textContent = key ? "Live replies on" : "Capture only; replies come in tomorrow's brief";
+  $("bMorning").classList.toggle("primary", !pm);
+  $("bEvening").classList.toggle("primary", pm);
+  updateQn();
+}
+function updateQn() {
+  const n = LS.get("aug_queue", []).length;
+  $("dotSync").className = "dot " + (n ? "warn" : "ok");
+  $("syncTxt").textContent = n ? n + (n === 1 ? " entry" : " entries") + " waiting to sync" : "Everything synced";
+  $("bFlush").hidden = !n;
 }
 
-function drive(mode){
-  stopFlag=false;show("drive");grabLock();
-  driveState(mode==="morning"?"Fetching your brief…":"Starting debrief…");
-  var answers=[],briefMeta=null;
-  var t0=Date.now();
-  fetchBrief().catch(function(e){return {text:mode==="morning"
-      ?"Good morning. No brief in the repo yet, so this is the built-in default. "+(e.msg||"")
-      :null,questions:null,fallback:true}})
-  .then(function(brief){
-    briefMeta=brief&&brief.date?brief.date:"fallback";
-    var qs;
-    if(mode==="morning"){
-      qs=(brief&&brief.questions&&brief.questions.length?brief.questions:["What's the plan for today?"]).slice(0,2);
-      driveState("Your brief");driveDetail("");
-      return speak(brief.text||"Good morning.").then(function(){
-        return qs.reduce(function(p,q){return p.then(function(){return ask(q,answers)})},Promise.resolve());
-      });
+/* ---------- drive flow ---------- */
+function fallbackText(e) {
+  const why = e && e.soft ? "there isn't one in the repo yet"
+    : e && e.status === 401 ? "the GitHub token was rejected"
+    : e && e.status ? "GitHub answered " + e.status
+    : e && e.name === "AbortError" ? "the connection timed out"
+    : e instanceof TypeError ? "there's no connection"
+    : "the brief file couldn't be read";
+  return "Good morning. I couldn't load today's brief: " + why + ". Let's just plan.";
+}
+function briefNote(b) {
+  if (b.fallback) return "No brief loaded";
+  if (!b.date) return "";
+  const d = new Date(b.date + "T12:00:00");
+  const txt = isNaN(d) ? String(b.date) : d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+  return b.date === today() ? txt : txt + ", not today's";
+}
+function buildEntry(s) {
+  const e = { ts: new Date().toISOString(), source: "pwa", mode: s.mode, brief: s.briefMeta || "fallback",
+    duration_s: Math.round((Date.now() - s.t0) / 1000), turns: s.turns, ua: navigator.userAgent.slice(0, 80) };
+  if (s.conversation) {
+    e.conversation = true;
+    e.api_turns = s.apiTurns;
+    e.est_api_cost_usd = Math.round(s.cost * 1e6) / 1e6;
+    if (s.apiError) e.api_error = s.apiError;
+  }
+  return e;
+}
+function checkpoint(s) { if (s.turns.length) saveDraft(s, buildEntry(s)); }
+
+async function ask(s, q, retry) {   // one scripted question; one re-ask on silence
+  if (s.stopped) return;
+  ui(s, "speaking", q, "");
+  await speak(q, s);
+  if (s.stopped) return;
+  try {
+    const a = await listen(20000, s, hear(s, q));
+    if (!s.stopped && END_RE.test(norm(a))) return "end";
+    s.turns.push({ q, a }); checkpoint(s);
+  } catch (err) {
+    if (s.stopped || err === "stopped") return;
+    if (err === "no-speech" && !retry) return ask(s, q, true);
+    s.turns.push({ q, a: "(no answer: " + err + ")" }); checkpoint(s);
+  }
+}
+
+async function freeTalk(s) {   // listen, respond, listen... until a closing phrase, two silences or End session
+  s.conversation = true;
+  if (s.key) s.sys = sysPrompt(s);
+  const live = () => !!s.key && !s.degraded;
+  const label = () => "Free talk" + (s.key ? (s.degraded ? " · capture" : " · live") : "");
+  step(s, label());
+  let line = "Anything else on your mind?", misses = 0, first = true, acks = 0;
+  while (!s.stopped) {
+    if (line) { ui(s, "speaking", line, ""); await speak(line, s); line = ""; if (s.stopped) break; }
+    let heard;
+    try { heard = await listen(30000, s, hear(s, "")); }
+    catch (err) {
+      if (s.stopped || err === "stopped") break;
+      if (FATAL.test(err) || ++misses >= 2) break;
+      continue;   // first silence: listen once more without nagging
     }
-    qs=(brief&&brief.evening_questions&&brief.evening_questions.length?brief.evening_questions
-        :["Walk me through your day — what actually happened since this morning?",
-          "What annoyed you or wasted your time today?",
-          "What's the one thing for tomorrow?"]).slice(0,3);
-    return qs.reduce(function(p,q){return p.then(function(){return ask(q,answers)})},Promise.resolve());
-  })
-  .then(function(){
-    if(stopFlag&&!answers.length){driveState("Ended.");return}
-    driveState("Saving…");
-    var entry={ts:new Date().toISOString(),source:"pwa",mode:mode,brief:briefMeta,
-      duration_s:Math.round((Date.now()-t0)/1000),turns:answers,
-      ua:navigator.userAgent.slice(0,80)};
-    return putJournal(entry).then(function(){return flush()}).then(function(){
-      driveState("Logged. Drive safe.");speak(mode==="morning"?"Logged. Drive safe.":"All logged. Good night.");
-    }).catch(function(e){queue(entry);
-      driveState("Saved offline — will sync later.");speak("Saved offline. It will sync later.");
-    });
-  })
-  .catch(function(e){driveState("Error");driveDetail(String(e&&e.msg||e))});
+    misses = 0;
+    if (!s.stopped && closing(heard, first)) break;
+    first = false;
+    s.turns.push({ role: "user", text: heard }); checkpoint(s);
+    if (s.stopped) break;
+    if (!live()) {
+      line = acks++ ? ACKS[(acks - 2) % ACKS.length] : "Got it. That's logged for tomorrow's brief. Anything else?";
+      continue;
+    }
+    ui(s, "thinking", "Thinking", quote(heard));
+    s.history.push({ role: "user", content: heard });
+    while (s.history.length > HIST_MAX) s.history.splice(0, 2);   // drop oldest exchange; still starts with user
+    const inChars = s.sys.length + s.history.reduce((n, m) => n + m.content.length, 0);
+    try {
+      const r = await reply(s);
+      s.apiTurns++;
+      s.cost += cost(r.usage, inChars, r.text.length);
+      s.history.push({ role: "assistant", content: r.text });
+      s.turns.push({ role: "assistant", text: r.text }); checkpoint(s);
+      line = r.text;
+    } catch (e) {
+      if (s.stopped) break;
+      s.degraded = true;
+      s.apiError = (e && (e.msg || e.name)) || "error";
+      step(s, label());
+      line = "Connection hiccup. I'll just log from here.";
+    }
+  }
+}
+
+async function finish(s) {
+  try {
+    const label = s.mode === "morning" ? "Morning drive" : "Evening debrief";
+    step(s, "");
+    if (s.stopped && !s.turns.length) {
+      clearDraft(s);
+      ui(s, "busy", "Ended", "");
+      homeNote("Session ended. Nothing to save.");
+      return;
+    }
+    ui(s, "busy", "Saving", "");
+    const entry = buildEntry(s);
+    saveDraft(s, entry);
+    let ok = true;
+    try { await putJournal(entry); } catch (_) { ok = false; queue(entry); }
+    clearDraft(s);
+    s.saved = true;
+    if (ok) flush();
+    const line = ok ? (s.mode === "morning" ? "Logged. Drive safe." : "All logged. Good night.") : "Saved offline. It will sync later.";
+    const notes = [ok ? label + " logged at " + clock() + "." : label + " saved on this phone. It will sync when you're online."];
+    if (s.apiError) notes.push("Live replies stopped: " + s.apiError + ".");
+    if (s.err) notes.push("Error: " + s.err);
+    homeNote(notes.join("\n"), ok && !s.apiError && !s.err ? "ok" : "warn");
+    ui(s, ok ? "done" : "warn", line, s.err ? "Error: " + s.err : s.apiError ? "Live replies stopped: " + s.apiError : "");
+    if (!s.stopped && cur === s) await speak(line, s);
+  } finally {
+    s.done = true;
+    if (cur === s) { dropLock(); const b = $("bStop"); b.textContent = "Done"; b.className = "done"; }
+  }
+}
+
+async function drive(mode) {
+  if (cur && !cur.done && !cur.stopped) return;   // a double tap never starts a second session
+  audio();                                        // unlock Web Audio inside the tap
+  const s = cur = { mode, t0: Date.now(), turns: [], history: [], key: LS.get("aug_akey", ""),
+    stopped: false, done: false, apiTurns: 0, cost: 0 };
+  $("dMode").textContent = mode === "morning" ? "Morning drive" : "Evening debrief";
+  const b = $("bStop"); b.textContent = "End session"; b.className = "";
+  step(s, "");
+  ui(s, "busy", mode === "morning" ? "Fetching your brief" : "Starting debrief", "");
+  show("drive"); grabLock();
+  try {
+    let brief;
+    try {
+      brief = await fetchBrief();
+      if (!brief || typeof brief !== "object") throw { msg: "brief unreadable" };
+    } catch (e) {
+      brief = { text: mode === "morning" ? fallbackText(e) : null, questions: null, fallback: true };
+    }
+    s.briefMeta = brief.date ? brief.date : "fallback";
+    s.briefDate = brief.date || "";
+    s.briefText = brief.fallback ? "" : String(brief.text || "");
+    if (!s.stopped) {
+      let qs;
+      if (mode === "morning") {
+        qs = (Array.isArray(brief.questions) && brief.questions.length ? brief.questions : ["What's the plan for today?"]).slice(0, 2);
+        step(s, "Brief");
+        ui(s, "speaking", "Your brief", briefNote(brief));
+        await speak(brief.text || "Good morning.", s);
+      } else {
+        qs = (Array.isArray(brief.evening_questions) && brief.evening_questions.length ? brief.evening_questions : EVENING_QS).slice(0, 3);
+      }
+      for (let i = 0; i < qs.length && !s.stopped; i++) {
+        step(s, (i + 1) + " of " + qs.length);
+        if (await ask(s, String(qs[i])) === "end") { s.voiceEnd = true; break; }
+      }
+      if (!s.stopped && !s.voiceEnd) await freeTalk(s);
+    }
+  } catch (e) {
+    s.err = String((e && (e.msg || e.message)) || e);
+  }
+  await finish(s);
+}
+
+/* ---------- settings ---------- */
+function fillSetup() {
+  const has = !!LS.get("aug_tok", "");
+  $("tok").value = LS.get("aug_tok", "");
+  $("repo").value = LS.get("aug_repo", REPO0);
+  $("akey").value = LS.get("aug_akey", "");
+  $("setupTitle").textContent = has ? "Settings" : "Set up Copilot";
+  $("bClose").hidden = !has;
+  $("bMic").textContent = LS.get("aug_micok", false) ? "Test mic" : "Enable mic";
+  setStatus([]);
+}
+function saveFields() {
+  LS.set("aug_tok", $("tok").value.trim());
+  LS.set("aug_repo", $("repo").value.trim() || REPO0);
+  const k = $("akey").value.trim();
+  if (k) LS.set("aug_akey", k); else LS.del("aug_akey");
+}
+function setStatus(lines) {
+  const el = $("setupStatus");
+  el.textContent = "";
+  lines.forEach(([tone, text]) => {
+    const d = document.createElement("div");
+    d.textContent = text;
+    if (tone) d.className = tone;
+    el.appendChild(d);
+  });
+}
+function testGitHub() {
+  return gh("", { timeout: 15000 }).then(r => {
+    if (r.ok) return ["ok-t", "GitHub: connected"];
+    if (r.status === 404) return ["warn-t", "GitHub: reachable, but the repo is empty or hidden from this token (404)"];
+    if (r.status === 401) return ["err-t", "GitHub: token rejected (401)"];
+    return ["err-t", "GitHub: HTTP " + r.status];
+  }, () => ["err-t", "GitHub: network error"]);
+}
+function testClaude(key) {   // a 1-token request on the real path: CORS, auth, model access, billing
+  return anthropic({ model: MODEL, max_tokens: 1, messages: [{ role: "user", content: "ping" }] }, key, 15000).then(({ r, j }) => {
+    if (r.ok) return ["ok-t", "Claude: key works, live replies on"];
+    if (r.status === 401) return ["err-t", "Claude: key rejected (401)"];
+    if (r.status === 429) return ["warn-t", "Claude: key works but is rate-limited right now"];
+    if (r.status >= 500) return ["warn-t", "Claude: Anthropic is busy (HTTP " + r.status + "), try again"];
+    const m = j.error && j.error.message ? ": " + String(j.error.message).slice(0, 140) : "";
+    return ["err-t", "Claude: HTTP " + r.status + m];
+  }, () => ["err-t", "Claude: couldn't reach api.anthropic.com"]);
 }
 
 /* ---------- wiring ---------- */
-$("bTest").onclick=function(){
-  var s=$("setupStatus");s.textContent="testing…";s.className="status";
-  LS.set("aug_tok",$("tok").value.trim());LS.set("aug_repo",$("repo").value.trim());
-  gh("").then(function(r){
-    if(r.status===404){s.textContent="repo reachable, empty (fine — briefs land tonight)";s.className="status ok"}
-    else if(r.ok){s.textContent="connection OK";s.className="status ok"}
-    else{s.textContent="HTTP "+r.status+(r.status===401?" — bad token":r.status===404?"":" ");s.className="status err"}
-  }).catch(function(){s.textContent="network error";s.className="status err"});
+$("bTest").onclick = async () => {
+  saveFields();
+  setStatus([["", "Testing…"]]);
+  const key = LS.get("aug_akey", "");
+  const out = [await testGitHub()];
+  out.push(key ? await testClaude(key) : ["", "Claude: no key, capture-only mode"]);
+  setStatus(out);
 };
-$("bMic").onclick=function(){
-  var s=$("setupStatus");
-  if(!SR){s.textContent="no SpeechRecognition in this browser";s.className="status err";return}
-  s.textContent="say something…";s.className="status";stopFlag=false;
-  listen(8000).then(function(t){s.textContent="mic OK — heard: "+t;s.className="status ok";LS.set("aug_micok",true)},
-    function(e){s.textContent="mic error: "+e+(e==="not-allowed"?" — check the padlock icon → Permissions → Microphone":"");s.className="status err"});
+$("bMic").onclick = () => {
+  audio();
+  if (!SR) { setStatus([["err-t", "This browser has no speech recognition."]]); return; }
+  setStatus([["", "Say something…"]]);
+  listen(8000, null, { onText: t => setStatus([["", "Hearing: " + t]]) }).then(t => {
+    LS.set("aug_micok", true);
+    $("bMic").textContent = "Test mic";
+    setStatus([["ok-t", "Mic works. Heard: " + t]]);
+  }, e => setStatus([["err-t", "Mic error: " + e + (e === "not-allowed" ? ". Allow the microphone for this site in Chrome's site settings." : "")]]));
 };
-$("bSave").onclick=function(){
-  LS.set("aug_tok",$("tok").value.trim());LS.set("aug_repo",$("repo").value.trim());
-  show("home");updateQn();
+$("bSave").onclick = () => { saveFields(); show("home"); };
+$("bClose").onclick = () => show("home");
+$("bSetup").onclick = () => show("setup");
+$("bMorning").onclick = () => drive("morning");
+$("bEvening").onclick = () => drive("evening");
+$("bStop").onclick = () => {
+  const s = cur;
+  if (s && !s.done) { s.stopped = true; if (!s.saved) homeNote("Saving the session…"); }
+  cancelAll();
+  try { if (synth) synth.cancel(); } catch (_) {}
+  dropLock();
+  show("home");
+  flush();
 };
-$("bSetup").onclick=function(){ $("tok").value=LS.get("aug_tok","");$("repo").value=LS.get("aug_repo","pcetner/augment-transport");show("setup") };
-$("bMorning").onclick=function(){drive("morning")};
-$("bEvening").onclick=function(){drive("evening")};
-$("bStop").onclick=function(){stopFlag=true;try{speechSynthesis.cancel()}catch(_){}
-  if(wakeLock){try{wakeLock.release()}catch(_){}} show("home");flush()};
-$("bFlush").onclick=function(){var h=$("homeStatus");h.textContent="syncing…";
-  flush().then(function(n){h.textContent="synced "+n+" queued entr"+(n===1?"y":"ies");updateQn()})};
+$("bFlush").onclick = () => {
+  homeNote("Syncing…");
+  flush().then(n => {
+    const left = LS.get("aug_queue", []).length;
+    homeNote(left ? "Synced " + n + "; " + left + " still waiting. Check the connection or token."
+                  : "Synced " + n + (n === 1 ? " entry." : " entries."), left ? "warn" : "ok");
+  });
+};
 
-if(LS.get("aug_tok","")){show("home");updateQn()}else{show("setup")}
-window.addEventListener("online",flush);
+const recovered = recoverDrafts();
+if (LS.get("aug_tok", "")) show("home"); else show("setup");
+if (recovered) homeNote("Recovered an interrupted session; it is queued to sync.", "warn");
+window.addEventListener("online", flush);
+if (LS.get("aug_tok", "") && LS.get("aug_queue", []).length && navigator.onLine !== false) flush();
 })();
 </script>
 </body>
